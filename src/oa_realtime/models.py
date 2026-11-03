@@ -4,7 +4,7 @@ import warnings
 import numpy as np
 from scipy.optimize import nnls
 from sklearn.compose import TransformedTargetRegressor
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.neighbors import KNeighborsRegressor
@@ -83,6 +83,37 @@ def fit_fixed_profiles(x, u, profiles, groups=None):
         raise ValueError('Spectra and positive uncertainties must be finite')
     coefficients = np.array([nnls((profiles / sig[None, :]).T, value / sig, maxiter=5000)[0]
                              for value, sig in zip(x, u)])
+    if groups is None:
+        return coefficients
+    return np.column_stack([coefficients[:, indices].sum(axis=1) for indices in groups])
+
+
+def fit_weighted_elastic_net(x, u, profiles, mz, groups=None):
+    """Fit normalized historical profiles using the CASA-style weighted elastic net.
+
+    Rows of profiles are factors; columns are the m/z channels in x, u, and mz.
+    Settings reproduce the earlier CASA fitting function used in the comparison.
+    """
+    x, u, profiles = map(lambda a: np.asarray(a, dtype=float), (x, u, profiles))
+    mz = np.asarray(mz)
+    if x.ndim == 1:
+        x, u = x[None, :], u[None, :]
+    if (x.ndim != 2 or x.shape != u.shape or profiles.ndim != 2 or
+            x.shape[1] != profiles.shape[1] or mz.shape != (x.shape[1],)):
+        raise ValueError('Incompatible spectrum, uncertainty, profile, or m/z dimensions')
+    if (not np.isfinite(x).all() or not np.isfinite(u).all() or
+            not np.isfinite(profiles).all() or (u <= 0).any()):
+        raise ValueError('Spectra and profiles must be finite and uncertainties positive')
+    weights = 1.0 / np.maximum(np.maximum(u, 0.05 * np.abs(x)), np.finfo(float).eps)**2
+    for channel, multiplier in {43: 1.5, 44: 2.0, 55: 1.4, 57: 1.8, 60: 2.5, 73: 2.0}.items():
+        weights[:, mz == channel] *= multiplier
+    solver = ElasticNet(alpha=1e-6, l1_ratio=0.5, positive=True, fit_intercept=False,
+                        max_iter=10000, tol=1e-4)
+    coefficients = []
+    for spectrum, weight in zip(x, weights):
+        solver.fit(profiles.T, spectrum, sample_weight=weight)
+        coefficients.append(solver.coef_.copy())
+    coefficients = np.asarray(coefficients)
     if groups is None:
         return coefficients
     return np.column_stack([coefficients[:, indices].sum(axis=1) for indices in groups])
