@@ -4,6 +4,7 @@ import os
 import platform
 from pathlib import Path
 import numpy as np
+import pandas as pd
 from threadpoolctl import threadpool_limits
 
 
@@ -31,6 +32,36 @@ def agreement(estimate, reference):
     mae = float(np.mean(np.abs(estimate - reference)))
     mean = float(np.mean(reference))
     return {'mae': mae, 'normalized_mae_percent': 100 * mae / mean if mean else float('nan')}
+
+
+def first_in_time_bins(observations, interval='2h'):
+    """Select the first observation in each occupied interval of each period.
+
+    The input must contain period, time, and index columns. Ties in time are
+    resolved by index, matching the schedule used in the manuscript.
+    """
+    x = observations.copy()
+    if x[['period', 'time', 'index']].isna().any().any():
+        raise ValueError('Period, time, and index must be present')
+    x['time'] = pd.to_datetime(x['time'], errors='raise')
+    if x.duplicated(['period', 'index']).any():
+        raise ValueError('Observation indices must be unique within each period')
+    x['_bin_start'] = x['time'].dt.floor(interval)
+    x = x.sort_values(['period', 'time', 'index'])
+    x = x.drop_duplicates(['period', '_bin_start'], keep='first')
+    return x.drop(columns='_bin_start').reset_index(drop=True)
+
+
+def day_weighted_mae(estimate, reference, times):
+    """Mean of daily MAEs, giving each observed day equal weight."""
+    estimate, reference = np.asarray(estimate), np.asarray(reference)
+    days = pd.to_datetime(pd.Series(times), errors='raise').dt.floor('D')
+    if (estimate.ndim != 1 or estimate.shape != reference.shape or
+            len(estimate) != len(days) or not len(days) or days.isna().any() or
+            not np.isfinite(estimate).all() or not np.isfinite(reference).all()):
+        raise ValueError('Estimates, references, and times must be aligned and finite')
+    errors = pd.DataFrame({'day': days, 'absolute_error': np.abs(estimate - reference)})
+    return float(errors.groupby('day')['absolute_error'].mean().mean())
 
 
 def benchmark(calls, n_observations, repetitions=128, seed=20261102):
