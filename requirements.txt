@@ -6,3 +6,4 @@ xgboost
 lightgbm
 torch
 threadpoolctl
+tabicl==2.2.0

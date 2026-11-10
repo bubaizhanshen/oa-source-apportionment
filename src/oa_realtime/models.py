@@ -189,6 +189,40 @@ def normalized_features(x, uncertainty=None):
     return features / scale[:, None], scale
 
 
+class NearestShapeRegressor:
+    """Estimate factor-to-signal ratios from the nearest historical spectra."""
+
+    def __init__(self, neighbors=5):
+        if not isinstance(neighbors, int) or neighbors < 1:
+            raise ValueError('neighbors must be a positive integer')
+        self.neighbors = neighbors
+
+    def fit(self, x, contributions):
+        features, scale = normalized_features(x)
+        y = np.asarray(contributions, dtype=float)
+        if y.ndim == 1:
+            y = y[:, None]
+        if (y.ndim != 2 or y.shape[0] != len(scale) or not np.isfinite(y).all()
+                or len(scale) < self.neighbors):
+            raise ValueError('Historical contributions or neighbor count are invalid')
+        self.shapes_ = features.copy()
+        self.ratios_ = y / scale[:, None]
+        return self
+
+    def predict(self, x):
+        if not hasattr(self, 'shapes_'):
+            raise ValueError('Fit the historical spectra before prediction')
+        features, scale = normalized_features(x)
+        if features.shape[1] != self.shapes_.shape[1]:
+            raise ValueError('Current and historical spectra must use the same channels')
+        distances = np.maximum(
+            np.sum(features * features, axis=1)[:, None]
+            + np.sum(self.shapes_ * self.shapes_, axis=1)[None, :]
+            - 2 * features @ self.shapes_.T, 0.0)
+        nearest = np.argsort(distances, axis=1, kind='stable')[:, :self.neighbors]
+        return self.ratios_[nearest].mean(axis=1) * scale[:, None]
+
+
 def fit_normalized_trees(method, x, contributions, parameters, uncertainty=None):
     """Fit per-source trees to normalized historical spectra and PMF labels."""
     features, scale = normalized_features(x, uncertainty)

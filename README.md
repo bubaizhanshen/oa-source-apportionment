@@ -14,4 +14,6 @@ The weighted elastic-net comparison uses the settings of an earlier CASA fitting
 
 For signal-normalized models, `fit_normalized_trees` and `predict_normalized_trees` divide each spectrum and its historical PMF contributions by the spectrum's positive signal sum, then rescale the prediction. The corresponding regressor functions use the same transformation. If uncertainties are supplied, they are divided by the same signal sum. `prepare_history_constrained_run` prepares a continuation around historical PMF profiles; `source_total_error` evaluates estimates against known or explicitly specified reference contributions.
 
+`NearestShapeRegressor` estimates contributions from the five closest normalized historical spectra. `TabICLSourceRegressor` evaluates the pretrained TabICLv2 model with either direct or signal-normalized inputs; its optional quantiles are not calibrated prediction intervals.
+
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.

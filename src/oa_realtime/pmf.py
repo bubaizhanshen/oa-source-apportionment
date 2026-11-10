@@ -62,30 +62,24 @@ def parse_matrix_block(
 def parse_factors(
     target: Path, prefix: str, task: int, sample_count: int, species_count: int, factor_count: int
 ) -> tuple[np.ndarray, np.ndarray]:
-    lines = (target / f"{prefix}.txt").read_text(
-        encoding="utf-8", errors="replace"
-    ).splitlines()
-    active = False
-    contributions = profiles = None
-    index = 0
-    while index < len(lines):
-        match = re.search(r"Results written by postprocessing for task #\s+(\d+)", lines[index])
-        if match:
-            active = int(match.group(1)) == task
-        if active and "Factor matrix AA" in lines[index]:
-            contributions, index = parse_matrix_block(
-                lines, index + 1, sample_count, factor_count
-            )
-            continue
-        if active and "Factor matrix BB" in lines[index]:
-            profiles, index = parse_matrix_block(
-                lines, index + 1, species_count, factor_count
-            )
-            break
-        index += 1
-    if contributions is None or profiles is None:
-        raise ValueError(f"Could not parse task {task} from {prefix}.txt")
-    return contributions, profiles
+    """Read all three ME-2 factors and absorb CC into the contributions.
+
+    Each task in the ME-2 .dat file contains AA, BB and one CC row.  The
+    reconstructed observations are ``(AA * CC) @ BB.T``.  CC can differ from
+    one in constrained continuations, so omitting it changes the result.
+    """
+    if task < 1 or min(sample_count, species_count, factor_count) < 1:
+        raise ValueError('Task and matrix dimensions must be positive')
+    values = np.loadtxt(Path(target) / f'{prefix}.dat', ndmin=2)
+    block_rows = sample_count + species_count + 1
+    if (values.shape[1] != factor_count or values.shape[0] % block_rows or
+            task > values.shape[0] // block_rows or not np.isfinite(values).all()):
+        raise ValueError(f'Unexpected ME-2 factor blocks in {prefix}.dat')
+    offset = (task - 1) * block_rows
+    aa = values[offset:offset + sample_count]
+    bb = values[offset + sample_count:offset + sample_count + species_count]
+    cc = values[offset + sample_count + species_count]
+    return aa * cc, bb
 
 
 def window_indices(times, cutoff, days=14, include_current=True):
