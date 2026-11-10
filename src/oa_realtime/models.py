@@ -165,3 +165,53 @@ def fit_regressors(method, x, y, parameters):
 def predict_regressors(models, x):
     predictions = np.stack([np.asarray(model.predict(x), dtype=float) for model in models])
     return np.maximum(predictions.mean(axis=0), 0.0)
+
+
+def normalized_features(x, uncertainty=None):
+    """Scale spectra, and optional uncertainties, by each positive signal sum."""
+    x = np.asarray(x, dtype=float)
+    if x.ndim == 1:
+        x = x[None, :]
+    if x.ndim != 2 or not np.isfinite(x).all():
+        raise ValueError('Spectra must be a finite matrix')
+    scale = np.maximum(x, 0).sum(axis=1)
+    if not np.isfinite(scale).all() or (scale <= 0).any():
+        raise ValueError('Each spectrum must have a positive signal sum')
+    if uncertainty is None:
+        features = x
+    else:
+        u = np.asarray(uncertainty, dtype=float)
+        if u.ndim == 1:
+            u = u[None, :]
+        if u.shape != x.shape or not np.isfinite(u).all() or (u <= 0).any():
+            raise ValueError('Uncertainties must match the spectra and be positive')
+        features = np.column_stack((x, u))
+    return features / scale[:, None], scale
+
+
+def fit_normalized_trees(method, x, contributions, parameters, uncertainty=None):
+    """Fit per-source trees to normalized historical spectra and PMF labels."""
+    features, scale = normalized_features(x, uncertainty)
+    y = np.asarray(contributions, dtype=float)
+    if y.ndim != 2 or y.shape[0] != len(scale) or not np.isfinite(y).all():
+        raise ValueError('Historical contributions must align with spectra')
+    return fit_tree_models(method, features, y / scale[:, None], parameters)
+
+
+def predict_normalized_trees(method, models, x, uncertainty=None):
+    features, scale = normalized_features(x, uncertainty)
+    return predict_trees(method, models, features) * scale[:, None]
+
+
+def fit_normalized_regressors(method, x, contributions, parameters, uncertainty=None):
+    """Apply the same representation to the non-tree regressors."""
+    features, scale = normalized_features(x, uncertainty)
+    y = np.asarray(contributions, dtype=float)
+    if y.ndim != 2 or y.shape[0] != len(scale) or not np.isfinite(y).all():
+        raise ValueError('Historical contributions must align with spectra')
+    return fit_regressors(method, features, y / scale[:, None], parameters)
+
+
+def predict_normalized_regressors(models, x, uncertainty=None):
+    features, scale = normalized_features(x, uncertainty)
+    return predict_regressors(models, features) * scale[:, None]

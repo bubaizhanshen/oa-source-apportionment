@@ -34,6 +34,15 @@ def agreement(estimate, reference):
     return {'mae': mae, 'normalized_mae_percent': 100 * mae / mean if mean else float('nan')}
 
 
+def source_total_error(estimate, reference):
+    """Sum absolute source errors divided by the sum of reference contributions."""
+    estimate, reference = np.asarray(estimate, dtype=float), np.asarray(reference, dtype=float)
+    if (estimate.shape != reference.shape or not np.isfinite(estimate).all() or
+            not np.isfinite(reference).all() or (reference < 0).any() or reference.sum() <= 0):
+        raise ValueError('Expected aligned estimates and nonnegative reference contributions')
+    return 100 * float(np.abs(estimate - reference).sum() / reference.sum())
+
+
 def first_in_time_bins(observations, interval='2h'):
     """Select the first observation in each occupied interval of each period.
 

@@ -171,3 +171,69 @@ def match_barcelona(profiles, reference):
     hoa = max((i for i in range(4) if i != coa), key=lambda i: (similarity[0, i], -i))
     pairs = {'joint_prior': [int(cols[0]), int(cols[1])], 'coa_first': [hoa, coa]}
     return {name: [[p[0]], [p[1]], sorted(set(range(4)) - set(p))] for name, p in pairs.items()}
+
+
+def prepare_history_constrained_run(base_dir, historical_profiles, current_profiles,
+                                    task, output_dir, run_id='bounded', a_value=0.5):
+    """Continue a converged ME-2 task with bounds around matched historical profiles.
+
+    Both profile matrices have one unit-sum factor per row. The true profiles,
+    if known from a simulation, must not be passed to this function.
+    """
+    base_dir, output_dir = Path(base_dir), Path(output_dir)
+    historical = np.asarray(historical_profiles, dtype=float)
+    current = np.asarray(current_profiles, dtype=float)
+    if (historical.ndim != 2 or historical.shape != current.shape or
+            not np.isfinite(historical).all() or not np.isfinite(current).all() or
+            (historical < 0).any() or (current < 0).any() or
+            not np.allclose(historical.sum(axis=1), 1) or
+            not np.allclose(current.sum(axis=1), 1) or not 0 <= a_value <= 1):
+        raise ValueError('Expected matched unit-sum profiles and an a-value in [0, 1]')
+    if not re.fullmatch(r'[A-Za-z0-9]+', run_id):
+        raise ValueError('run_id must contain only letters and digits')
+    cosine = current @ historical.T / np.outer(np.linalg.norm(current, axis=1),
+                                                np.linalg.norm(historical, axis=1))
+    rows, to_history = linear_sum_assignment(-cosine)
+    if not np.array_equal(rows, np.arange(len(current))):
+        raise ValueError('Could not match all factor profiles')
+    lines = [s.strip() for s in (base_dir / 'iniparams.txt').read_text().splitlines() if s.strip()]
+    if len(lines) != 12 or lines[0] != '161110' or lines[-1] != '161110':
+        raise ValueError('Unexpected ME-2 iniparams file')
+    controls = lines[2].split()
+    if len(controls) != 6 or not 1 <= task <= int(controls[4]):
+        raise ValueError('Selected base task is unavailable')
+    controls[4], controls[5] = '1', str(task)
+    lines[2] = ' '.join(controls)
+    continuation = lines[4].split()
+    if len(continuation) != 6:
+        raise ValueError('Unexpected continuation control')
+    continuation[0:2] = ['1', '0']
+    lines[4] = ' '.join(continuation)
+    normalization = lines[5].split()
+    if len(normalization) != 2 or normalization[1] not in ('0', '1'):
+        raise ValueError('Unexpected factor normalization control')
+    normalization[1] = '1'
+    lines[5] = ' '.join(normalization)
+    names = re.findall(r"'([^']+)'", lines[9])
+    if len(names) != 3:
+        raise ValueError('Unexpected ME-2 input filenames')
+    lines[9] = f"'pmfdata.txt' 'PMF_prev_res.dat' '{run_id}'"
+    final = lines[10].split()
+    if len(final) != 5:
+        raise ValueError('Unexpected final control')
+    final[3:5] = ['0', '0']
+    lines[10] = ' '.join(final)
+    output_dir.mkdir(parents=True, exist_ok=False)
+    for name in ('pmfdata.txt', 'me2gfP4_1345c4.exe', 'me2key.key', 'PMF_bs_6f8xx_sealed_GUI.ini'):
+        shutil.copy2(base_dir / name, output_dir / name)
+    shutil.copy2(base_dir / (names[2] + '.dat'), output_dir / 'PMF_prev_res.dat')
+    (output_dir / 'iniparams.txt').write_text('\n'.join(lines) + '\n', encoding='ascii')
+    keys = np.full((historical.shape[1], historical.shape[0]), -1, dtype=int)
+    lower = (historical[to_history] * (1 - a_value)).T
+    upper = (historical[to_history] * (1 + a_value)).T
+    with (output_dir / 'moreparams.txt').open('w', encoding='ascii') as out:
+        out.write('0 0 0 1 0\n')
+        for matrix in (keys, lower, upper):
+            for row in matrix:
+                out.write(' '.join(f'{float(v):.12g}' for v in row) + '\n')
+    return {'directory': output_dir, 'current_to_history': to_history, 'lower': lower, 'upper': upper}
