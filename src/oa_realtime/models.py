@@ -88,6 +88,54 @@ def fit_fixed_profiles(x, u, profiles, groups=None):
     return np.column_stack([coefficients[:, indices].sum(axis=1) for indices in groups])
 
 
+def fit_profile_regularized(x, u, profiles, estimates, weight, groups=None):
+    """Fit nonnegative profiles while penalizing deviation from source estimates.
+
+    ``groups`` partitions profile rows into the estimated sources. Profiles
+    and estimates must use compatible units. The penalty is ``weight`` times
+    the mean diagonal of the uncertainty-weighted profile cross-product.
+    Returns one column per profile; zero weight gives ordinary profile fitting.
+    """
+    x, u, profiles, estimates = (np.asarray(a, dtype=float) for a in (x, u, profiles, estimates))
+    if x.ndim == 1:
+        x, u = x[None, :], u[None, :]
+    if (x.ndim != 2 or x.shape != u.shape or profiles.ndim != 2 or not len(profiles)
+            or x.shape[1] != profiles.shape[1]):
+        raise ValueError('Incompatible spectrum, uncertainty, or profile dimensions')
+    if (not np.isfinite(x).all() or not np.isfinite(u).all() or (u <= 0).any()
+            or not np.isfinite(profiles).all() or (profiles < 0).any()
+            or (np.linalg.norm(profiles, axis=1) <= 0).any()):
+        raise ValueError('Spectra and profiles must be finite and uncertainties positive')
+    if not np.isscalar(weight) or not np.isfinite(weight) or weight < 0:
+        raise ValueError('weight must be finite and nonnegative')
+    if groups is None:
+        mapping = np.eye(len(profiles))
+    else:
+        groups = [list(indices) for indices in groups]
+        flat = [index for indices in groups for index in indices]
+        if (not groups or any(not indices for indices in groups)
+                or any(not isinstance(i, (int, np.integer)) for i in flat)
+                or sorted(flat) != list(range(len(profiles)))):
+            raise ValueError('groups must partition the profile rows')
+        mapping = np.zeros((len(groups), len(profiles)))
+        for i, indices in enumerate(groups):
+            mapping[i, indices] = 1.0
+    if estimates.ndim == 1:
+        estimates = estimates[None, :] if len(x) == 1 else estimates[:, None]
+    if (estimates.shape != (len(x), len(mapping)) or not np.isfinite(estimates).all()
+            or (estimates < 0).any()):
+        raise ValueError('Source estimates must be aligned, finite, and nonnegative')
+    result = []
+    for spectrum, sigma, estimate in zip(x, u, estimates):
+        design = (profiles / sigma).T
+        target = spectrum / sigma
+        regularization = weight * np.sum(design * design) / np.sum(mapping * mapping)
+        matrix = np.vstack((design, np.sqrt(regularization) * mapping))
+        response = np.concatenate((target, np.sqrt(regularization) * estimate))
+        result.append(nnls(matrix, response, maxiter=5000)[0])
+    return np.asarray(result)
+
+
 def fit_weighted_elastic_net(x, u, profiles, mz, groups=None):
     """Fit normalized historical profiles using the CASA-style weighted elastic net.
 

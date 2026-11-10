@@ -18,4 +18,6 @@ For signal-normalized models, `fit_normalized_trees` and `predict_normalized_tre
 
 `SequentialInterval` adjusts later intervals using a reference only after it becomes available; it evaluates agreement with the supplied reference.
 
+`fit_profile_regularized` combines current-spectrum fitting with existing source estimates, including grouped factors.
+
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.
