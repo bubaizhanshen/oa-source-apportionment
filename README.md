@@ -16,4 +16,6 @@ For signal-normalized models, `fit_normalized_trees` and `predict_normalized_tre
 
 `NearestShapeRegressor` estimates contributions from the five closest normalized historical spectra. `TabICLSourceRegressor` evaluates the pretrained TabICLv2 model with either direct or signal-normalized inputs; its optional quantiles are not calibrated prediction intervals.
 
+`SequentialInterval` adjusts later intervals using a reference only after it becomes available; it evaluates agreement with the supplied reference.
+
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.
