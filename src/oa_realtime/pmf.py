@@ -202,6 +202,10 @@ def prepare_history_constrained_run(base_dir, historical_profiles, current_profi
     controls = lines[2].split()
     if len(controls) != 6 or not 1 <= task <= int(controls[4]):
         raise ValueError('Selected base task is unavailable')
+    selected = read_q(base_dir)
+    selected = selected.loc[selected.task == task]
+    if len(selected) != 1 or int(selected.iloc[0].endcode) != 4 or not np.isfinite(selected.iloc[0].q_robust):
+        raise ValueError('Selected base task did not converge')
     controls[4], controls[5] = '1', str(task)
     lines[2] = ' '.join(controls)
     continuation = lines[4].split()
