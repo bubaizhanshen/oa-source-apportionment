@@ -3,6 +3,7 @@ import time
 import warnings
 import numpy as np
 from scipy.optimize import nnls
+from sklearn.base import clone
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.linear_model import ElasticNet, Ridge
 from sklearn.model_selection import TimeSeriesSplit
@@ -235,6 +236,72 @@ def normalized_features(x, uncertainty=None):
             raise ValueError('Uncertainties must match the spectra and be positive')
         features = np.column_stack((x, u))
     return features / scale[:, None], scale
+
+
+class SourceScalingRegressor:
+    """Compare spectrum and target scaling with a shared per-source estimator."""
+
+    def __init__(self, estimator, input_mode='shape', scale_target=True, weight_signal=False):
+        if input_mode not in ('raw', 'shape', 'shape_signal'):
+            raise ValueError('input_mode must be raw, shape, or shape_signal')
+        if weight_signal and not scale_target:
+            raise ValueError('Signal-squared weights require scaled targets')
+        self.estimator = estimator
+        self.input_mode = input_mode
+        self.scale_target = scale_target
+        self.weight_signal = weight_signal
+
+    def _features(self, x):
+        x = np.atleast_2d(np.asarray(x, dtype=float))
+        shape, scale = normalized_features(x)
+        if self.input_mode == 'raw':
+            features = x
+        elif self.input_mode == 'shape_signal':
+            features = np.column_stack((shape, np.log(scale)))
+        else:
+            features = shape
+        return features, scale
+
+    def fit(self, x, contributions):
+        features, scale = self._features(x)
+        y = np.asarray(contributions, dtype=float)
+        if y.ndim == 1:
+            y = y[:, None]
+        if y.ndim != 2 or y.shape[0] != len(scale) or not np.isfinite(y).all():
+            raise ValueError('Historical contributions must align with spectra')
+        if self.scale_target:
+            y = y / scale[:, None]
+        if not np.isfinite(y).all():
+            raise ValueError('Scaled contributions must be finite')
+        weights = None
+        if self.weight_signal:
+            weights = np.square(scale)
+            if not np.isfinite(weights).all() or weights.mean() <= 0:
+                raise ValueError('Signal-squared weights must be finite and positive')
+            weights = weights / weights.mean()
+        self.models_ = []
+        for k in range(y.shape[1]):
+            model = clone(self.estimator)
+            if weights is None:
+                model.fit(features, y[:, k])
+            else:
+                model.fit(features, y[:, k], sample_weight=weights)
+            self.models_.append(model)
+        self.n_features_in_ = np.atleast_2d(np.asarray(x)).shape[1]
+        return self
+
+    def predict(self, x):
+        if not hasattr(self, 'models_'):
+            raise ValueError('Fit the historical spectra before prediction')
+        if np.atleast_2d(np.asarray(x)).shape[1] != self.n_features_in_:
+            raise ValueError('Current and historical spectra must use the same channels')
+        features, scale = self._features(x)
+        prediction = np.column_stack([model.predict(features) for model in self.models_])
+        if self.scale_target:
+            prediction = prediction * scale[:, None]
+        if not np.isfinite(prediction).all():
+            raise ValueError('Predicted contributions must be finite')
+        return np.maximum(prediction, 0.0)
 
 
 class NearestShapeRegressor:
