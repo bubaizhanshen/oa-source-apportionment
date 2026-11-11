@@ -20,4 +20,6 @@ For signal-normalized models, `fit_normalized_trees` and `predict_normalized_tre
 
 `fit_profile_regularized` combines current-spectrum fitting with existing source estimates, including grouped factors.
 
+`match_profiles` aligns current factors with historical profiles for correspondence sensitivity comparisons.
+
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.

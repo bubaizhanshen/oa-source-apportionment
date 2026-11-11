@@ -167,6 +167,28 @@ def match_barcelona(profiles, reference):
     return {name: [[p[0]], [p[1]], sorted(set(range(4)) - set(p))] for name, p in pairs.items()}
 
 
+def match_profiles(reference_profiles, current_profiles):
+    """Match each reference factor to one current factor by spectral cosine.
+
+    Return current-factor indices in reference order and their cosine values.
+    Matching defines correspondence; it does not establish source identity.
+    """
+    reference = np.asarray(reference_profiles, dtype=float)
+    current = np.asarray(current_profiles, dtype=float)
+    if (reference.ndim != 2 or reference.shape != current.shape or
+            not reference.size or not np.isfinite(reference).all() or
+            not np.isfinite(current).all()):
+        raise ValueError('Expected matching finite factor-by-channel matrices')
+    norms = np.outer(np.linalg.norm(reference, axis=1), np.linalg.norm(current, axis=1))
+    if not np.isfinite(norms).all() or (norms == 0).any():
+        raise ValueError('Factor profiles must have finite nonzero norms')
+    similarity = reference @ current.T / norms
+    rows, cols = linear_sum_assignment(-similarity)
+    if not np.array_equal(rows, np.arange(len(reference))):
+        raise ValueError('Could not match all factor profiles')
+    return cols, similarity[rows, cols]
+
+
 def prepare_history_constrained_run(base_dir, historical_profiles, current_profiles,
                                     task, output_dir, run_id='bounded', a_value=0.5):
     """Continue a converged ME-2 task with bounds around matched historical profiles.
