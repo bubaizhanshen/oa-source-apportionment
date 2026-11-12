@@ -140,6 +140,31 @@ def source_increment(before, after, added_signal, target_factor):
             'allocation_error': np.abs(response - expected).sum(axis=1)}
 
 
+def leave_one_study_out_selection(errors, methods):
+    """Select a fixed method using source additions from the other studies.
+
+    ``errors`` has dimensions study, source category, addition level, method.
+    Each study, category, and level receives equal weight. Supply methods in
+    the desired tie-breaking order. The held-out scores are evaluation results,
+    not independent measurements of ambient source contributions.
+    """
+    values = np.asarray(errors, dtype=float)
+    methods = tuple(methods)
+    if (values.ndim != 4 or values.shape[0] < 2 or not all(values.shape[1:])
+            or values.shape[-1] != len(methods) or len(set(methods)) != len(methods)
+            or not np.isfinite(values).all() or (values < 0).any()):
+        raise ValueError('Provide finite nonnegative study-by-category-by-level errors for unique methods')
+    calibration, heldout, chosen = [], [], []
+    for study in range(values.shape[0]):
+        scores = np.delete(values, study, axis=0).mean(axis=(0, 1, 2))
+        test_scores = values[study].mean(axis=(0, 1))
+        calibration.append(scores)
+        heldout.append(test_scores)
+        chosen.append(int(np.argmin(scores)))
+    return {'methods': methods, 'selected_index': np.asarray(chosen),
+            'calibration_error': np.asarray(calibration), 'heldout_error': np.asarray(heldout)}
+
+
 def source_constraint_centers(historical_profiles, source_library):
     """Blend unit-sum historical factors with their category-mean spectra."""
     historical = np.asarray(historical_profiles, dtype=float)
