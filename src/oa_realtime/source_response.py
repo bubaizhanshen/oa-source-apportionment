@@ -2,6 +2,42 @@
 import numpy as np
 
 
+def add_source_to_window(spectra, uncertainties, profile, amount, observations=1,
+                         added_uncertainty_fraction=None, channel_uncertainty_ratio=None):
+    """Add the same unit-sum source profile to the last observations in a window.
+
+    The optional uncertainty settings describe sensitivity scenarios.  Neither
+    adds random noise to the spectrum.  A channel ratio can be below or above one.
+    """
+    x, u, p = (np.asarray(a, dtype=float) for a in (spectra, uncertainties, profile))
+    if (x.ndim != 2 or u.shape != x.shape or p.shape != (x.shape[1],)
+            or not np.isfinite(x).all() or not np.isfinite(u).all() or (u <= 0).any()
+            or not np.isfinite(p).all() or (p < 0).any()
+            or not np.isclose(p.sum(), 1.0, rtol=1e-6, atol=1e-8)):
+        raise ValueError('Spectra, positive uncertainties and a unit-sum profile must be aligned')
+    if (not np.isscalar(amount) or not np.isfinite(amount) or amount <= 0
+            or isinstance(observations, bool) or not isinstance(observations, (int, np.integer))
+            or not 1 <= observations <= len(x)):
+        raise ValueError('The added signal and number of observations must be positive')
+    if added_uncertainty_fraction is not None and channel_uncertainty_ratio is not None:
+        raise ValueError('Use at most one uncertainty sensitivity scenario')
+    modified_x, modified_u = x.copy(), u.copy()
+    increment = float(amount) * p
+    modified_x[-observations:] += increment
+    if added_uncertainty_fraction is not None:
+        if (not np.isscalar(added_uncertainty_fraction)
+                or not np.isfinite(added_uncertainty_fraction) or added_uncertainty_fraction < 0):
+            raise ValueError('The added uncertainty fraction must be nonnegative')
+        modified_u[-observations:] = np.hypot(
+            u[-observations:], (float(added_uncertainty_fraction) * float(amount)) * p)
+    elif channel_uncertainty_ratio is not None:
+        ratio = np.asarray(channel_uncertainty_ratio, dtype=float)
+        if ratio.shape != p.shape or not np.isfinite(ratio).all() or (ratio <= 0).any():
+            raise ValueError('Provide one positive uncertainty ratio for each channel')
+        modified_u[-observations:] = u[-observations:] * ratio
+    return modified_x, modified_u
+
+
 def replace_source_profiles(factors, profile_ids, wide, additional_ids, seed=6130):
     """Replace half of each existing factor/profile/intensity stratum.
 

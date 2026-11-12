@@ -27,6 +27,8 @@ For signal-normalized models, `fit_normalized_trees` and `predict_normalized_tre
 
 For the study-held-out library comparison, `replace_source_profiles` changes source spectra within existing factor and intensity strata, and `augment_with_assignment` rebuilds the corresponding training data. `expanded_constraint_centers` combines the original and added source-category means with historical profiles; `prepare_source_constrained_run` applies these bounds to matched PMF factors while leaving other factors free.
 
+`add_source_to_window` applies a source addition to consecutive observations and optionally changes the corresponding uncertainty weights; `source_increment` scores the resulting factor response.
+
 `leave_one_study_out_selection` screens fixed methods using source-increment errors from the other studies and reports each held-out comparison.
 
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.
