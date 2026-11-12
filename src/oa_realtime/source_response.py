@@ -2,6 +2,60 @@
 import numpy as np
 
 
+def replace_source_profiles(factors, profile_ids, wide, additional_ids, seed=6130):
+    """Replace half of each existing factor/profile/intensity stratum.
+
+    Additional IDs are supplied by factor after withholding the test study.
+    The original factor, intensity, and added amount are unchanged.
+    """
+    factors, profile_ids, wide = np.asarray(factors), np.asarray(profile_ids).astype(str), np.asarray(wide)
+    if factors.ndim != 1 or profile_ids.shape != factors.shape or wide.shape != factors.shape:
+        raise ValueError('Factor, profile, and intensity assignments must be aligned')
+    if wide.dtype.kind != 'b':
+        raise ValueError('wide must be a Boolean array')
+    if not additional_ids or any(not ids or len(set(ids)) != len(ids) for ids in additional_ids.values()):
+        raise ValueError('Each added factor needs unique profile IDs')
+    width = max([64, *(len(str(i)) for ids in additional_ids.values() for i in ids),
+                 *(len(i) for i in profile_ids)])
+    result = profile_ids.astype(f'U{width}').copy()
+    changed = np.zeros(len(factors), dtype=bool)
+    rng = np.random.default_rng(seed)
+    for factor in sorted(additional_ids):
+        offset = 0
+        for old_id in sorted(set(profile_ids[factors == factor])):
+            for is_wide in (False, True):
+                candidates = np.flatnonzero((factors == factor) & (profile_ids == old_id) & (wide == is_wide))
+                for index in rng.permutation(candidates)[:len(candidates) // 2]:
+                    result[index] = additional_ids[factor][offset % len(additional_ids[factor])]
+                    changed[index] = True
+                    offset += 1
+    return result, changed
+
+
+def augment_with_assignment(spectra, uncertainties, contributions, source_library, assignment):
+    """Reconstruct training additions from an existing assignment of source spectra."""
+    x, u, y = (np.asarray(a, dtype=float) for a in (spectra, uncertainties, contributions))
+    if (x.ndim != 2 or x.shape != u.shape or y.ndim != 2 or len(x) != len(y) or not len(x)
+            or not np.isfinite(x).all() or not np.isfinite(u).all() or not np.isfinite(y).all()
+            or (u <= 0).any()):
+        raise ValueError('Historical observations, uncertainties, and labels must be aligned')
+    factors, ids, amounts = (np.asarray(assignment[k]) for k in ('factor', 'profile_id', 'amount'))
+    if (factors.shape != (len(x),) or ids.shape != (len(x),) or amounts.shape != (len(x),)
+            or not np.isfinite(amounts.astype(float)).all() or (amounts.astype(float) < 0).any()):
+        raise ValueError('Invalid assigned source or amount')
+    out_x, out_y = x.copy(), y.copy()
+    for index, (factor, sid, amount) in enumerate(zip(factors, ids, amounts.astype(float))):
+        if not isinstance(factor, (int, np.integer)) or factor < 0 or factor >= y.shape[1]:
+            raise ValueError('Invalid assigned factor')
+        profile = np.asarray(source_library[factor][str(sid)], dtype=float)
+        if (profile.shape != (x.shape[1],) or not np.isfinite(profile).all() or (profile < 0).any()
+                or not np.isclose(profile.sum(), 1.0, rtol=1e-6, atol=1e-8)):
+            raise ValueError('Assigned profiles must be finite, nonnegative, and sum to one')
+        out_x[index] += amount * profile
+        out_y[index, factor] += amount
+    return np.vstack((x, out_x)), np.vstack((u, u)), np.vstack((y, out_y))
+
+
 def augment_sources(spectra, uncertainties, contributions, source_library,
                     intensity='mixed', seed=2026):
     """Add one randomly selected source to each historical observation.
@@ -103,3 +157,24 @@ def source_constraint_centers(historical_profiles, source_library):
             raise ValueError('Source profiles must be nonnegative and sum to one')
         centers[factor] = 0.5 * historical[factor] + 0.5 * values.mean(axis=0)
     return centers
+
+
+def expanded_constraint_centers(historical_profiles, original_library, additional_library):
+    """Blend historical factors with existing and added source-category means."""
+    if not set(additional_library).issubset(original_library):
+        raise ValueError('Added categories must exist in the original library')
+    source_constraint_centers(historical_profiles, original_library)
+    source_constraint_centers(historical_profiles, additional_library)
+    combined = {}
+    for factor, original in original_library.items():
+        if not original:
+            raise ValueError('Original source categories cannot be empty')
+        if factor in additional_library:
+            additional = additional_library[factor]
+            if not additional:
+                raise ValueError('Additional source categories cannot be empty')
+            combined[factor] = {'original_mean': np.mean(list(original.values()), axis=0),
+                                'additional_mean': np.mean(list(additional.values()), axis=0)}
+        else:
+            combined[factor] = original
+    return source_constraint_centers(historical_profiles, combined)

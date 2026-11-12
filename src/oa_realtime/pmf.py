@@ -175,8 +175,8 @@ def match_profiles(reference_profiles, current_profiles):
     """
     reference = np.asarray(reference_profiles, dtype=float)
     current = np.asarray(current_profiles, dtype=float)
-    if (reference.ndim != 2 or reference.shape != current.shape or
-            not reference.size or not np.isfinite(reference).all() or
+    if (reference.ndim != 2 or current.ndim != 2 or reference.shape[1] != current.shape[1] or
+            len(reference) > len(current) or not reference.size or not np.isfinite(reference).all() or
             not np.isfinite(current).all()):
         raise ValueError('Expected matching finite factor-by-channel matrices')
     norms = np.outer(np.linalg.norm(reference, axis=1), np.linalg.norm(current, axis=1))
@@ -189,29 +189,10 @@ def match_profiles(reference_profiles, current_profiles):
     return cols, similarity[rows, cols]
 
 
-def prepare_history_constrained_run(base_dir, historical_profiles, current_profiles,
-                                    task, output_dir, run_id='bounded', a_value=0.5):
-    """Continue a converged ME-2 task with bounds around matched historical profiles.
-
-    Both profile matrices have one unit-sum factor per row. The true profiles,
-    if known from a simulation, must not be passed to this function.
-    """
+def _prepare_continuation(base_dir, task, output_dir, run_id):
     base_dir, output_dir = Path(base_dir), Path(output_dir)
-    historical = np.asarray(historical_profiles, dtype=float)
-    current = np.asarray(current_profiles, dtype=float)
-    if (historical.ndim != 2 or historical.shape != current.shape or
-            not np.isfinite(historical).all() or not np.isfinite(current).all() or
-            (historical < 0).any() or (current < 0).any() or
-            not np.allclose(historical.sum(axis=1), 1) or
-            not np.allclose(current.sum(axis=1), 1) or not 0 <= a_value <= 1):
-        raise ValueError('Expected matched unit-sum profiles and an a-value in [0, 1]')
     if not re.fullmatch(r'[A-Za-z0-9]+', run_id):
         raise ValueError('run_id must contain only letters and digits')
-    cosine = current @ historical.T / np.outer(np.linalg.norm(current, axis=1),
-                                                np.linalg.norm(historical, axis=1))
-    rows, to_history = linear_sum_assignment(-cosine)
-    if not np.array_equal(rows, np.arange(len(current))):
-        raise ValueError('Could not match all factor profiles')
     lines = [s.strip() for s in (base_dir / 'iniparams.txt').read_text().splitlines() if s.strip()]
     if len(lines) != 12 or lines[0] != '161110' or lines[-1] != '161110':
         raise ValueError('Unexpected ME-2 iniparams file')
@@ -248,6 +229,65 @@ def prepare_history_constrained_run(base_dir, historical_profiles, current_profi
         shutil.copy2(base_dir / name, output_dir / name)
     shutil.copy2(base_dir / (names[2] + '.dat'), output_dir / 'PMF_prev_res.dat')
     (output_dir / 'iniparams.txt').write_text('\n'.join(lines) + '\n', encoding='ascii')
+
+
+def prepare_source_constrained_run(base_dir, reference_profiles, constraint_centers, current_profiles,
+                                   task, output_dir, run_id='bounded', a_value=0.5):
+    """Continue a PMF solution with constraints on selected, matched factors.
+
+    Each row in ``reference_profiles`` names one constrained factor. Its
+    corresponding row in ``constraint_centers`` defines its a-value bounds;
+    remaining current factors are free.
+    """
+    reference = np.asarray(reference_profiles, dtype=float)
+    centers = np.asarray(constraint_centers, dtype=float)
+    current = np.asarray(current_profiles, dtype=float)
+    if (reference.ndim != 2 or centers.shape != reference.shape or current.ndim != 2
+            or current.shape[1] != reference.shape[1] or len(current) < len(reference)
+            or any(not np.isfinite(a).all() or (a < 0).any()
+                   or not np.allclose(a.sum(axis=1), 1) for a in (reference, centers, current))
+            or not 0 <= a_value <= 1):
+        raise ValueError('Expected aligned unit-sum profiles and an a-value in [0, 1]')
+    columns, similarity = match_profiles(reference, current)
+    _prepare_continuation(base_dir, task, output_dir, run_id)
+    output_dir = Path(output_dir)
+    keys = np.zeros((current.shape[1], current.shape[0]), dtype=int)
+    lower = np.zeros_like(keys, dtype=float)
+    upper = np.zeros_like(keys, dtype=float)
+    keys[:, columns] = -1
+    lower[:, columns] = (centers * (1 - a_value)).T
+    upper[:, columns] = (centers * (1 + a_value)).T
+    with (output_dir / 'moreparams.txt').open('w', encoding='ascii') as out:
+        out.write('0 0 0 1 0\n')
+        for matrix in (keys, lower, upper):
+            for row in matrix:
+                out.write(' '.join(f'{float(v):.12g}' for v in row) + '\n')
+    return {'directory': output_dir, 'assigned_columns': columns, 'similarity': similarity,
+            'lower': lower, 'upper': upper}
+
+
+def prepare_history_constrained_run(base_dir, historical_profiles, current_profiles,
+                                    task, output_dir, run_id='bounded', a_value=0.5):
+    """Continue a converged ME-2 task with bounds around matched historical profiles.
+
+    Both profile matrices have one unit-sum factor per row. The true profiles,
+    if known from a simulation, must not be passed to this function.
+    """
+    base_dir, output_dir = Path(base_dir), Path(output_dir)
+    historical = np.asarray(historical_profiles, dtype=float)
+    current = np.asarray(current_profiles, dtype=float)
+    if (historical.ndim != 2 or historical.shape != current.shape or
+            not np.isfinite(historical).all() or not np.isfinite(current).all() or
+            (historical < 0).any() or (current < 0).any() or
+            not np.allclose(historical.sum(axis=1), 1) or
+            not np.allclose(current.sum(axis=1), 1) or not 0 <= a_value <= 1):
+        raise ValueError('Expected matched unit-sum profiles and an a-value in [0, 1]')
+    cosine = current @ historical.T / np.outer(np.linalg.norm(current, axis=1),
+                                                np.linalg.norm(historical, axis=1))
+    rows, to_history = linear_sum_assignment(-cosine)
+    if not np.array_equal(rows, np.arange(len(current))):
+        raise ValueError('Could not match all factor profiles')
+    _prepare_continuation(base_dir, task, output_dir, run_id)
     keys = np.full((historical.shape[1], historical.shape[0]), -1, dtype=int)
     lower = (historical[to_history] * (1 - a_value)).T
     upper = (historical[to_history] * (1 + a_value)).T

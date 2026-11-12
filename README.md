@@ -25,4 +25,6 @@ For signal-normalized models, `fit_normalized_trees` and `predict_normalized_tre
 
 `match_profiles` aligns current factors with historical profiles for correspondence sensitivity comparisons.
 
+For the study-held-out library comparison, `replace_source_profiles` changes source spectra within existing factor and intensity strata, and `augment_with_assignment` rebuilds the corresponding training data. `expanded_constraint_centers` combines the original and added source-category means with historical profiles; `prepare_source_constrained_run` applies these bounds to matched PMF factors while leaving other factors free.
+
 Scaling each spectrum, its uncertainties, and its contributions together leaves the standard weighted PMF residuals unchanged when constraints are compatible.
