@@ -231,6 +231,35 @@ def _prepare_continuation(base_dir, task, output_dir, run_id):
     (output_dir / 'iniparams.txt').write_text('\n'.join(lines) + '\n', encoding='ascii')
 
 
+def prepare_source_bounded_run(base_dir, reference_profiles, lower_bounds, upper_bounds,
+                               current_profiles, task, output_dir, run_id='bounded'):
+    """Continue PMF with explicit bounds on selected, matched factor profiles."""
+    reference, lower, upper, current = (np.asarray(x, dtype=float) for x in
+                                        (reference_profiles, lower_bounds, upper_bounds, current_profiles))
+    if (reference.ndim != 2 or lower.shape != reference.shape or upper.shape != reference.shape
+            or current.ndim != 2 or current.shape[1] != reference.shape[1]
+            or len(current) < len(reference) or not len(reference)
+            or any(not np.isfinite(a).all() or (a < 0).any() for a in (reference, lower, upper, current))
+            or not np.allclose(reference.sum(axis=1), 1) or not np.allclose(current.sum(axis=1), 1)
+            or (lower > upper).any() or (lower.sum(axis=1) > 1 + 1e-8).any()
+            or (upper.sum(axis=1) < 1 - 1e-8).any()):
+        raise ValueError('Expected compatible unit-sum profiles and feasible nonnegative bounds')
+    columns, similarity = match_profiles(reference, current)
+    _prepare_continuation(base_dir, task, output_dir, run_id)
+    output_dir = Path(output_dir)
+    keys = np.zeros((current.shape[1], current.shape[0]), dtype=int)
+    lows, highs = np.zeros_like(keys, dtype=float), np.zeros_like(keys, dtype=float)
+    keys[:, columns] = -1
+    lows[:, columns], highs[:, columns] = lower.T, upper.T
+    with (output_dir / 'moreparams.txt').open('w', encoding='ascii') as out:
+        out.write('0 0 0 1 0\n')
+        for matrix in (keys, lows, highs):
+            for row in matrix:
+                out.write(' '.join(f'{float(v):.12g}' for v in row) + '\n')
+    return {'directory': output_dir, 'assigned_columns': columns, 'similarity': similarity,
+            'lower': lows, 'upper': highs}
+
+
 def prepare_source_constrained_run(base_dir, reference_profiles, constraint_centers, current_profiles,
                                    task, output_dir, run_id='bounded', a_value=0.5):
     """Continue a PMF solution with constraints on selected, matched factors.

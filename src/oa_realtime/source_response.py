@@ -220,6 +220,36 @@ def source_constraint_centers(historical_profiles, source_library):
     return centers
 
 
+def source_constraint_envelope(historical_profiles, source_library, multiplier=2.0):
+    """Return channelwise bounds containing the available spectra for each factor.
+
+    ``source_library`` maps factor indices to mappings of spectrum IDs to
+    unit-sum profiles. Historical profiles are included in the envelope.
+    Remaining factors can be left unconstrained by the PMF continuation.
+    """
+    historical = np.asarray(historical_profiles, dtype=float)
+    if (historical.ndim != 2 or not len(historical) or not np.isfinite(historical).all()
+            or (historical < 0).any() or not np.allclose(historical.sum(axis=1), 1)
+            or not source_library or not np.isscalar(multiplier)
+            or not np.isfinite(multiplier) or multiplier < 1
+            or any(not isinstance(k, (int, np.integer)) for k in source_library)):
+        raise ValueError('Provide unit-sum historical profiles and a multiplier of at least one')
+    factors = sorted(source_library)
+    lower, upper = [], []
+    for factor in factors:
+        if (not isinstance(factor, (int, np.integer)) or factor < 0
+                or factor >= len(historical) or not source_library[factor]):
+            raise ValueError('Each constrained category needs a valid factor and source spectra')
+        profiles = np.asarray(list(source_library[factor].values()), dtype=float)
+        if (profiles.ndim != 2 or profiles.shape[1] != historical.shape[1]
+                or not np.isfinite(profiles).all() or (profiles < 0).any()
+                or not np.allclose(profiles.sum(axis=1), 1)):
+            raise ValueError('Source spectra must be nonnegative and sum to one')
+        lower.append(np.zeros(historical.shape[1]))
+        upper.append(multiplier * np.maximum(historical[factor], profiles.max(axis=0)))
+    return np.asarray(factors), np.stack(lower), np.stack(upper)
+
+
 def expanded_constraint_centers(historical_profiles, original_library, additional_library):
     """Blend historical factors with existing and added source-category means."""
     if not set(additional_library).issubset(original_library):
