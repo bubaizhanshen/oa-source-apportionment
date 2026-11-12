@@ -29,6 +29,8 @@ For the study-held-out library comparison, `replace_source_profiles` changes sou
 
 `add_source_to_window` applies a source addition to consecutive observations and optionally changes the corresponding uncertainty weights; `source_increment` scores the resulting factor response.
 
+`source_addition_reference` combines background factor estimates with a known source addition. `source_total_error` compares the complete estimate with that conditional reference.
+
 `source_constraint_envelope` retains the range of available source spectra; `prepare_source_bounded_run` applies its channelwise bounds to a PMF continuation.
 
 `leave_one_study_out_selection` screens fixed methods using source-increment errors from the other studies and reports each held-out comparison.

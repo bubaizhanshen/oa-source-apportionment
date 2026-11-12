@@ -150,6 +150,31 @@ def augment_sources(spectra, uncertainties, contributions, source_library,
     return np.vstack((x, augmented_x)), np.vstack((u, u)), np.vstack((y, augmented_y)), assignment
 
 
+def source_addition_reference(background, added_signal, target_factor):
+    """Assign a known addition to a specified background source factor.
+
+    The result is conditional on the supplied background and factor mapping;
+    it is not an independent measurement of atmospheric source mass.
+    """
+    value = np.asarray(background, dtype=float)
+    single = value.ndim == 1
+    if single:
+        value = value[None, :]
+    if (value.ndim != 2 or not len(value) or not np.isfinite(value).all()
+            or (value < 0).any() or isinstance(target_factor, (bool, np.bool_))
+            or not isinstance(target_factor, (int, np.integer))
+            or not 0 <= target_factor < value.shape[1]):
+        raise ValueError('Provide nonnegative background factors and a valid target')
+    amount = np.asarray(added_signal, dtype=float)
+    if amount.ndim == 0:
+        amount = np.full(len(value), amount)
+    if amount.shape != (len(value),) or not np.isfinite(amount).all() or (amount <= 0).any():
+        raise ValueError('Added signals must be positive and aligned with the background')
+    reference = value.copy()
+    reference[:, target_factor] += amount
+    return reference[0] if single else reference
+
+
 def source_increment(before, after, added_signal, target_factor):
     """Measure the total and source-specific response to a known addition.
 
